@@ -1,0 +1,80 @@
+#Librerías del Sistema y JSON
+
+#import json
+#import os
+#json: Maneja el guardado y carga del historial de ejercicios en formato JSON
+
+#os: Verifica la existencia del archivo de historial en el sistema de archivos
+
+#Interfaz Gráfica (Tkinter)
+
+#import tkinter as tk
+#from tkinter import ttk, messagebox, simpledialog, filedialog
+#tkinter: Crea la interfaz gráfica principal
+
+#ttk: Widgets con temas mejorados (botones, labels, combobox más modernos)
+
+#messagebox: Muestra ventanas de diálogo (información, advertencias, confirmaciones)
+
+#simpledialog: Para entradas simples de usuario
+
+#filedialog: Para seleccionar archivos (aunque no se usa directamente en el código)
+
+#Gráficos y Visualización
+
+#from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+#import matplotlib.pyplot as plt
+#from mpl_toolkits.mplot3d import Axes3D
+#import numpy as np
+#FigureCanvasTkAgg: Integra gráficos de matplotlib en la interfaz Tkinter
+
+#matplotlib.pyplot: Crea gráficos 2D y 3D de las regiones y superficies
+
+#mpl_toolkits.mplot3d: Permite gráficos tridimensionales (esferas, cilindros, etc.)
+
+#numpy: Cálculos numéricos eficientes y generación de mallas para gráficos 3D
+
+#Matemáticas Simbólicas y Numéricas
+
+#import sympy as sp
+#from sympy import symbols, sin, cos, tan, sqrt
+#sympy: Motor principal para cálculo simbólico (derivadas, integrales, simplificación)
+
+#symbols: Define variables simbólicas para manipulaciones matemáticas
+
+#sin, cos, tan, sqrt: Funciones matemáticas para expresiones simbólicas
+
+#Funcionalidades Específicas por Librería:
+#SymPy - Hace todo el trabajo matemático:
+#Resuelve integrales triples paso a paso
+
+#Calcula derivadas parciales para teoremas vectoriales
+
+#Simplifica expresiones matemáticas
+
+#Evalúa límites simbólicos
+
+#Matplotlib + NumPy - Visualización:
+#Grafica regiones 2D para el Teorema de Green
+
+#Dibuja superficies 3D para Stokes y Divergencia
+
+#Muestra campos vectoriales
+
+#Genera esferas, cilindros, elipsoides, etc.
+
+#Tkinter - Interfaz de Usuario:
+#Menús para seleccionar operaciones
+
+#Formularios de entrada de datos
+
+#Visualización de resultados paso a paso
+
+#Gestión del historial de ejercicios
+
+#JSON + OS - Persistencia:
+#Guarda automáticamente el historial en disco
+
+#Recupera ejercicios anteriores al reiniciar la aplicación
+
+
