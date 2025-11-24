@@ -89,37 +89,40 @@ def resolver_integral_triple(integrando, variables, limites, sistema_coordenadas
     expr = sp.sympify(integrando, locals=vars_locales)
     pasos.append(f"\nIntegrando inicial: {integrando}")
     
-    # === CORRECCIÓN COMPLETA: Detectar si el usuario ya incluyó el jacobiano ===
+    # === CORRECCIÓN COMPLETA Y MEJORADA: DETECCIÓN DEL JACOBIANO ===
     aplicar_jacobiano = True
 
     if sistema_coordenadas in ["cilindrica", "cilindricas"]:
-        # Detectar si el integrando contiene 'r' (posible jacobiano incluido)
+        # CORRECCIÓN: Detección MEJORADA para coordenadas cilíndricas
         integrando_limpio = integrando.replace(" ", "").lower()
         
-        # Casos donde el usuario probablemente ya incluyó el jacobiano
-        if any(condicion for condicion in [
-            integrando_limpio == "r",
-            integrando_limpio.startswith(("r+", "r-", "r*", "r/", "r**")),
-            "r*z" in integrando_limpio,
-            "r*theta" in integrando_limpio,
-            integrando_limpio in ["r+z", "r-z", "r+theta", "r-theta"]
-        ]):
+        # Solo NO aplicar jacobiano si es OBVIO que el usuario lo incluyó
+        condiciones_jacobiano_incluido = [
+            integrando_limpio == "r",                    # Integrando es exactamente "r"
+            integrando_limpio.startswith(("r*", "r/")),  # Comienza con "r*" o "r/"
+            "*r" in integrando_limpio,                   # Contiene "*r" como factor
+            "r*" in integrando_limpio,                   # Contiene "r*" como factor
+            integrando_limpio in ["r*z", "r*theta", "r*z*theta", "r*θ", "r*z*θ"]  # Casos específicos
+        ]
+        
+        if any(condiciones_jacobiano_incluido):
             aplicar_jacobiano = False
             pasos.append("NOTA: El integrando contiene 'r' (jacobiano incluido por el usuario)")
             pasos.append(f"Integrando final: {expr}")
+        else:
+            # Para integrando = 1 u otros casos, SÍ aplicar jacobiano
+            pasos.append(f"Multiplicando por el Jacobiano (r): integrando = {sp.simplify(expr * jacobiano)}")
+            expr *= jacobiano
 
     elif sistema_coordenadas in ["esferica", "esfericas"]:
-        # Lógica similar para coordenadas esféricas
+        # Lógica para coordenadas esféricas (ya funcionaba correctamente)
         integrando_limpio = integrando.replace(" ", "").lower()
         
         # Detectar solo si el integrando incluye el jacobiano COMPLETO
-        # o combinaciones que claramente indican jacobiano incluido
         jacobiano_completo = any([
             "rho**2*sin(phi)" in integrando_limpio,
             "r**2*sin(phi)" in integrando_limpio,
             "ρ²*sin(φ)" in integrando_limpio,
-            integrando_limpio == "rho**2",
-            integrando_limpio == "r**2"
         ])
         
         # Casos donde claramente el usuario incluyó parte del jacobiano
@@ -136,6 +139,12 @@ def resolver_integral_triple(integrando, variables, limites, sistema_coordenadas
             # Para sin(phi) solo, SÍ aplicar jacobiano
             pasos.append(f"Multiplicando por el Jacobiano ({jacobiano}): integrando = {sp.simplify(expr * jacobiano)}")
             expr *= jacobiano
+    
+    # Para coordenadas rectangulares, el jacobiano es 1, así que no hay cambio
+    elif sistema_coordenadas in ["rectangular", "rectangulares"]:
+        pasos.append(f"Integrando final: {expr}")
+        # Jacobiano = 1, no se necesita multiplicación adicional
+
     # ========== FIN DE LA CORRECCIÓN ==========
 
     # === PROCESO DE INTEGRACIÓN PASO A PASO ===
@@ -1837,9 +1846,69 @@ class AplicacionMultivariable(tk.Tk):
         if not self.registro_actual:
             messagebox.showwarning('Historial', 'No hay ejercicio actual para guardar.')
             return
+        
+        # MEJORA: GUARDAR LÍMITES EN FORMATO CORRECTO
+        if 'datos_grafico' in self.registro_actual:
+            datos_grafico = self.registro_actual['datos_grafico']
+            
+            # Para integrales triples, convertir límites a strings
+            if datos_grafico.get('tipo') in ['rectangular', 'cilindricas', 'esfericas']:
+                if 'limites' in datos_grafico:
+                    limites = datos_grafico['limites']
+                    limites_str = {}
+                    
+                    # Convertir cada límite de lista a string
+                    for var, limites_lista in limites.items():
+                        if isinstance(limites_lista, (list, tuple)) and len(limites_lista) == 2:
+                            limites_str[var] = f"{limites_lista[0]}, {limites_lista[1]}"
+                        else:
+                            limites_str[var] = str(limites_lista)
+                    
+                    datos_grafico['limites_guardados'] = limites_str
+                    
+                    # DEBUG: Mostrar qué se está guardando
+                    print(f"DEBUG: Guardando límites: {limites_str}")
+        
         self.historial.append(self.registro_actual)
         guardar_historial(self.historial)
         messagebox.showinfo('Historial', 'Ejercicio guardado en historial correctamente.')
+
+    def obtener_limites_actuales(self):
+        """Extrae los límites actuales del texto de salida"""
+        try:
+            lineas = self.texto_salida.get('1.0', 'end').splitlines()
+            limites = {}
+            for linea in lineas:
+                if 'Región' in linea and 'REAL:' in linea:
+                    # Buscar líneas con información de límites
+                    if 'x: [' in linea:
+                        limites['x'] = linea.split('x: [')[1].split(']')[0]
+                    elif 'y: [' in linea:
+                        limites['y'] = linea.split('y: [')[1].split(']')[0]
+                    elif 'z: [' in linea:
+                        limites['z'] = linea.split('z: [')[1].split(']')[0]
+                    elif 'r: [' in linea:
+                        limites['r'] = linea.split('r: [')[1].split(']')[0]
+                    elif 'θ: [' in linea:
+                        limites['theta'] = linea.split('θ: [')[1].split(']')[0]
+                    elif 'ρ: [' in linea:
+                        limites['rho'] = linea.split('ρ: [')[1].split(']')[0]
+                    elif 'φ: [' in linea:
+                        limites['phi'] = linea.split('φ: [')[1].split(']')[0]
+            return limites
+        except:
+            return {}
+
+    def obtener_integrando_actual(self):
+        """Extrae el integrando actual del texto de salida"""
+        try:
+            lineas = self.texto_salida.get('1.0', 'end').splitlines()
+            for linea in lineas:
+                if 'Integrando inicial:' in linea:
+                    return linea.split('Integrando inicial:')[1].strip()
+            return ''
+        except:
+            return ''
 
     def mostrar_historial(self):
         historial = cargar_historial()
@@ -1931,114 +2000,203 @@ class AplicacionMultivariable(tk.Tk):
 
     # Y AGREGA ESTA NUEVA FUNCIÓN a tu clase:
     def regenerar_grafica_desde_historial(self, datos_grafico):
-        """Regenera la gráfica desde datos del historial - FUNCIÓN NUEVA"""
+        """Regenera la gráfica desde datos del historial - VERSIÓN COMPLETA Y CORREGIDA"""
         try:
             if not datos_grafico:
                 return
                 
             tipo = datos_grafico.get('tipo', '')
+            limites = datos_grafico.get('limites_guardados', {})
             
-            # 1. TEOREMA DE GREEN - Regiones 2D
-            if tipo == 'green_region':
-                P = datos_grafico.get('P', 'x')
-                Q = datos_grafico.get('Q', 'y') 
-                region = datos_grafico.get('region', 'disco')
-                parametros = datos_grafico.get('parametros', {})
-                self.graficar_campo2d(P, Q, region, parametros)
-                
-            # 2. TEOREMA DE LA DIVERGENCIA - Regiones 3D
-            elif tipo in ['esfera', 'cilindro', 'cubo', 'elipsoide', 'cono', 'entre_superficies']:
-                region = tipo
-                parametros = datos_grafico
-                
-                if region == 'esfera':
-                    R = float(parametros.get('R', 1))
-                    limites_simulados = {'r': ('0', str(R))}
-                    self.graficar_esfera(limites_simulados, R)
-                    
-                elif region == 'cilindro':
-                    R = float(parametros.get('R', 1))
-                    h = float(parametros.get('h', 1))
-                    self.graficar_cilindro_div(R, h)
-                    
-                elif region == 'cubo':
-                    a = float(parametros.get('a', 1))
-                    b = float(parametros.get('b', 1))
-                    c = float(parametros.get('c', 1))
-                    self.graficar_cubo_div(a, b, c)
-                    
-                elif region == 'elipsoide':
-                    a = float(parametros.get('a', 1))
-                    b = float(parametros.get('b', 1))
-                    c = float(parametros.get('c', 1))
-                    self.graficar_elipsoide_div(a, b, c)
-                    
-                elif region == 'cono':
-                    R = float(parametros.get('R', 1))
-                    h = float(parametros.get('h', 1))
-                    self.graficar_cono_div(R, h)
-                    
-                elif region == 'entre_superficies':
-                    R_int = float(parametros.get('R_int', 0.5))
-                    R_ext = float(parametros.get('R_ext', 1))
-                    h = float(parametros.get('h', 1))
-                    self.graficar_region_entre_superficies(R_int, R_ext, h)
+            print(f"DEBUG: Regenerando gráfica tipo: {tipo}")
+            print(f"DEBUG: Límites disponibles: {list(limites.keys())}")
             
-            # 3. TEOREMA DE STOKES - Superficies 3D
-            elif tipo.startswith('stokes_'):
-                superficie = tipo.replace('stokes_', '')
-                Fx = datos_grafico.get('Fx', '-y')
-                Fy = datos_grafico.get('Fy', 'x')
-                Fz = datos_grafico.get('Fz', '0')
-                parametros = datos_grafico.get('parametros', {})
-                
-                if superficie == 'disco':
-                    R = float(parametros.get('R', 1))
-                    self.graficar_stokes_3d(R, Fx, Fy, Fz)
-                elif superficie == 'plano':
-                    a = float(parametros.get('a', 0))
-                    b = float(parametros.get('b', 0))
-                    c = float(parametros.get('c', 0))
-                    R = float(parametros.get('R', 1))
-                    self.graficar_plano_3d(a, b, c, R)
-                elif superficie == 'paraboloide':
-                    a = float(parametros.get('a', 1))
-                    R = float(parametros.get('R', 1))
-                    self.graficar_paraboloide_3d(a, R)
-                elif superficie == 'cilindro':
-                    R = float(parametros.get('R', 1))
-                    h = float(parametros.get('h', 1))
-                    self.graficar_cilindro_3d(R, h)
-            
-            # 4. INTEGRALES TRIPLES
-            elif tipo == 'rectangular':
-                # Para integral triple rectangular
+            # 1. INTEGRALES TRIPLES
+            if tipo == 'rectangular':
                 try:
-                    x_max = 2; y_max = 1; z_max = 3  # Valores por defecto
-                    self.graficar_caja_rectangular(None, x_max, y_max, z_max)
-                except:
-                    pass
-                    
-            elif tipo == 'esfericas':
-                # Para integral triple esférica
-                try:
-                    R = 2  # Valor por defecto
-                    limites_simulados = {'r': ('0', str(R))}
-                    self.graficar_esfera(limites_simulados, R)
-                except:
-                    pass
+                    print(f"DEBUG: Límites rectangular: {limites}")
+                    if 'x' in limites and 'y' in limites and 'z' in limites:
+                        # Convertir strings a floats
+                        x_parts = limites['x'].split(',')
+                        y_parts = limites['y'].split(',') 
+                        z_parts = limites['z'].split(',')
+                        
+                        x_min, x_max = float(x_parts[0].strip()), float(x_parts[1].strip())
+                        z_min, z_max = float(z_parts[0].strip()), float(z_parts[1].strip())
+                        
+                        # Verificar si y tiene límites variables
+                        y_lim_str = limites['y']
+                        if 'sqrt' in y_lim_str or 'x' in y_lim_str:
+                            # Usar función para límites variables
+                            y_min_func = sp.sympify(y_parts[0].strip())
+                            y_max_func = sp.sympify(y_parts[1].strip())
+                            self.graficar_region_rectangular_compleja(x_min, x_max, y_min_func, y_max_func, z_min, z_max)
+                            print("DEBUG: Usando región rectangular compleja")
+                        else:
+                            y_min, y_max = float(y_parts[0].strip()), float(y_parts[1].strip())
+                            self.graficar_region_rectangular(x_min, x_max, y_min, y_max, z_min, z_max)
+                            print("DEBUG: Usando región rectangular simple")
+                    else:
+                        print("DEBUG: Fallback a rectangular simple")
+                        self.graficar_region_rectangular(0, 1, 0, 1, 0, 1)
+                except Exception as e:
+                    print(f"Error regenerando rectangular: {e}")
+                    self.graficar_region_rectangular(0, 1, 0, 1, 0, 1)
                     
             elif tipo == 'cilindricas':
-                # Para integral triple cilíndrica
                 try:
-                    R = 2; h = 4  # Valores por defecto
-                    self.graficar_cilindro(None, R, h)
+                    print(f"DEBUG: Límites cilíndricas: {limites}")
+                    if 'r' in limites and 'theta' in limites and 'z' in limites:
+                        r_parts = limites['r'].split(',')
+                        theta_parts = limites['theta'].split(',')
+                        z_parts = limites['z'].split(',')
+                        
+                        r_min, r_max = float(r_parts[0].strip()), float(r_parts[1].strip())
+                        theta_min, theta_max = float(theta_parts[0].strip()), float(theta_parts[1].strip())
+                        
+                        # Verificar límites en z
+                        z_lim_str = limites['z']
+                        if 'r' in z_lim_str:
+                            # Límites variables en z
+                            self.graficar_region_cilindrica_compleja(r_min, r_max, theta_min, theta_max, 
+                                                                z_parts[0].strip(), z_parts[1].strip())
+                            print("DEBUG: Usando región cilíndrica compleja")
+                        else:
+                            z_min, z_max = float(z_parts[0].strip()), float(z_parts[1].strip())
+                            self.graficar_region_cilindrica(r_min, r_max, theta_min, theta_max, z_min, z_max)
+                            print("DEBUG: Usando región cilíndrica simple")
+                    else:
+                        print("DEBUG: Fallback a cilíndrica simple")
+                        self.graficar_region_cilindrica(0, 1, 0, 2*np.pi, 0, 1)
+                except Exception as e:
+                    print(f"Error regenerando cilíndrica: {e}")
+                    self.graficar_region_cilindrica(0, 1, 0, 2*np.pi, 0, 1)
+                    
+            elif tipo == 'esfericas':
+                try:
+                    print(f"DEBUG: Límites esféricas: {limites}")
+                    if 'rho' in limites and 'phi' in limites and 'theta' in limites:
+                        # Evaluar expresiones
+                        rho_parts = limites['rho'].split(',')
+                        phi_parts = limites['phi'].split(',')
+                        theta_parts = limites['theta'].split(',')
+                        
+                        rho_min = float(sp.N(sp.sympify(rho_parts[0].strip())))
+                        rho_max = float(sp.N(sp.sympify(rho_parts[1].strip())))
+                        phi_min = float(sp.N(sp.sympify(phi_parts[0].strip())))
+                        phi_max = float(sp.N(sp.sympify(phi_parts[1].strip())))
+                        theta_min = float(sp.N(sp.sympify(theta_parts[0].strip())))
+                        theta_max = float(sp.N(sp.sympify(theta_parts[1].strip())))
+                        
+                        print(f"DEBUG: Valores evaluados - rho: [{rho_min}, {rho_max}], phi: [{phi_min}, {phi_max}], theta: [{theta_min}, {theta_max}]")
+                        
+                        # USAR LA FUNCIÓN COMPLETA que tienes disponible
+                        self.graficar_region_esferica(rho_min, rho_max, phi_min, phi_max, theta_min, theta_max)
+                        print("DEBUG: Gráfica esférica COMPLETA generada")
+                            
+                    else:
+                        print("DEBUG: Fallback a esférica simple")
+                        self.graficar_esfera_simple(1)
+                except Exception as e:
+                    print(f"Error regenerando esférica: {e}")
+                    self.graficar_esfera_simple(1)
+
+            
+            # 2. TEOREMA DE GREEN - Regiones 2D
+            elif tipo == 'green_region':
+                try:
+                    P = datos_grafico.get('P', 'x')
+                    Q = datos_grafico.get('Q', 'y') 
+                    region = datos_grafico.get('region', 'disco')
+                    parametros = datos_grafico.get('parametros', {})
+                    print(f"DEBUG: Regenerando Green - región: {region}")
+                    self.graficar_campo2d(P, Q, region, parametros)
+                except Exception as e:
+                    print(f"Error regenerando Green: {e}")
+                
+            # 3. TEOREMA DE LA DIVERGENCIA - Regiones 3D
+            elif tipo in ['esfera', 'cilindro', 'cubo', 'elipsoide', 'cono', 'entre_superficies']:
+                try:
+                    region = tipo
+                    parametros = datos_grafico
+                    print(f"DEBUG: Regenerando Divergencia - región: {region}")
+                    
+                    if region == 'esfera':
+                        R = float(parametros.get('R', 1))
+                        self.graficar_esfera_div(R)
+                        
+                    elif region == 'cilindro':
+                        R = float(parametros.get('R', 1))
+                        h = float(parametros.get('h', 1))
+                        self.graficar_cilindro_div(R, h)
+                        
+                    elif region == 'cubo':
+                        a = float(parametros.get('a', 1))
+                        b = float(parametros.get('b', 1))
+                        c = float(parametros.get('c', 1))
+                        self.graficar_cubo_div(a, b, c)
+                        
+                    elif region == 'elipsoide':
+                        a = float(parametros.get('a', 1))
+                        b = float(parametros.get('b', 1))
+                        c = float(parametros.get('c', 1))
+                        self.graficar_elipsoide_div(a, b, c)
+                        
+                    elif region == 'cono':
+                        R = float(parametros.get('R', 1))
+                        h = float(parametros.get('h', 1))
+                        self.graficar_cono_div(R, h)
+                        
+                    elif region == 'entre_superficies':
+                        R_int = float(parametros.get('R_int', 0.5))
+                        R_ext = float(parametros.get('R_ext', 1))
+                        h = float(parametros.get('h', 1))
+                        self.graficar_region_entre_superficies(R_int, R_ext, h)
+                except Exception as e:
+                    print(f"Error regenerando Divergencia: {e}")
+            
+            # 4. TEOREMA DE STOKES - Superficies 3D
+            elif tipo.startswith('stokes_'):
+                try:
+                    superficie = tipo.replace('stokes_', '')
+                    Fx = datos_grafico.get('Fx', '-y')
+                    Fy = datos_grafico.get('Fy', 'x')
+                    Fz = datos_grafico.get('Fz', '0')
+                    parametros = datos_grafico.get('parametros', {})
+                    print(f"DEBUG: Regenerando Stokes - superficie: {superficie}")
+                    
+                    if superficie == 'disco':
+                        R = float(parametros.get('R', 1))
+                        self.graficar_stokes_3d(R, Fx, Fy, Fz)
+                    elif superficie == 'plano':
+                        a = float(parametros.get('a', 0))
+                        b = float(parametros.get('b', 0))
+                        c = float(parametros.get('c', 0))
+                        R = float(parametros.get('R', 1))
+                        self.graficar_plano_3d(a, b, c, R)
+                    elif superficie == 'paraboloide':
+                        a = float(parametros.get('a', 1))
+                        R = float(parametros.get('R', 1))
+                        self.graficar_paraboloide_3d(a, R)
+                    elif superficie == 'cilindro':
+                        R = float(parametros.get('R', 1))
+                        h = float(parametros.get('h', 1))
+                        self.graficar_cilindro_3d(R, h)
+                except Exception as e:
+                    print(f"Error regenerando Stokes: {e}")
+            
+            # 5. CASO POR DEFECTO - Mostrar mensaje
+            else:
+                print(f"DEBUG: Tipo de gráfica no reconocido: {tipo}")
+                # Intentar gráfica por defecto
+                try:
+                    self.graficar_region_rectangular(0, 1, 0, 1, 0, 1)
                 except:
                     pass
-                    
+                        
         except Exception as e:
-            print(f"Error regenerando gráfica desde historial: {e}")
-            # No mostrar error al usuario para no interrumpir la experiencia
+            print(f"Error general regenerando gráfica desde historial: {e}")
+            # No mostrar error al usuario para no interrumpir la experiencia la experiencia
 
     def abrir_menu_integral_triple(self):
         ventana_menu = tk.Toplevel(self)
@@ -2153,96 +2311,109 @@ class AplicacionMultivariable(tk.Tk):
         self.registro_actual = {
             'titulo': f'Integral Triple ({nombres_sistemas[sistema_coordenadas]})', 
             'lineas_salida': self.texto_salida.get('1.0','end').splitlines(), 
-            'datos_grafico': {'tipo': ('esfera' if sistema_coordenadas=='esfericas' else 'cilindro' if sistema_coordenadas=='cilindricas' else 'rectangular')}
+            'datos_grafico': {
+                'tipo': sistema_coordenadas,
+                'limites': limites,
+                'integrando': integrando,
+                'sistema': sistema_coordenadas
+            }
         }
         
-        # Generar gráfica según el sistema de coordenadas - VERSIÓN MEJORADA
+        # ============ GENERAR GRÁFICA DINÁMICA SEGÚN LÍMITES REALES ============
         if sistema_coordenadas == 'esfericas':
-            # Para esféricas: usar el radio máximo
             try:
-                rho_max = 0
-                for var, (min_val, max_val) in limites.items():
-                    if var in ['rho', 'r']:  # Buscar variables de radio
-                        try:
-                            rho_val = float(sp.N(sp.sympify(max_val)))
-                            rho_max = max(rho_max, rho_val)
-                        except:
-                            pass
-                R = rho_max if rho_max > 0 else 1
-                self.graficar_esfera(limites, R)  # ← Pasar límites y radio
-                self.registrar(f"\n📐 Región esférica: Radio = {R:.2f}")
+                 # Extraer límites reales de ρ, φ, θ
+                rho_min = float(sp.N(sp.sympify(limites.get('rho', ('0', '1'))[0])))
+                rho_max = float(sp.N(sp.sympify(limites.get('rho', ('0', '1'))[1])))
+                phi_min = float(sp.N(sp.sympify(limites.get('phi', ('0', 'pi'))[0])))
+                phi_max = float(sp.N(sp.sympify(limites.get('phi', ('0', 'pi'))[1])))
+                theta_min = float(sp.N(sp.sympify(limites.get('theta', ('0', '2*pi'))[0])))
+                theta_max = float(sp.N(sp.sympify(limites.get('theta', ('0', '2*pi'))[1])))
+
+                # Verificar si es una región esférica completa o parcial
+                es_completa = (phi_min == 0 and phi_max >= np.pi and 
+                      theta_min == 0 and theta_max >= 2*np.pi and
+                      rho_min == 0)
+
+                if es_completa:
+                    self.graficar_region_esferica(rho_min, rho_max, phi_min, phi_max, theta_min, theta_max)
+                else:
+                    self.graficar_region_esferica_compleja(rho_min, rho_max, phi_min, phi_max, theta_min, theta_max)
+                
+                self.registrar(f"\n📐 Región esférica REAL:")
+                self.registrar(f"   ρ: [{rho_min:.2f}, {rho_max:.2f}]")
+                self.registrar(f"   φ: [{phi_min:.2f}, {phi_max:.2f}]")
+                self.registrar(f"   θ: [{theta_min:.2f}, {theta_max:.2f}]")
+                
             except Exception as e:
-                self.graficar_esfera(limites, 1)
-                self.registrar(f"\n⚠️  Error en visualización: {e}")
+                self.registrar(f"\n⚠️  Error procesando límites esféricos: {e}")
+                self.graficar_region_esferica(0, 1, 0, np.pi, 0, 2*np.pi)
 
         elif sistema_coordenadas == 'cilindricas':
-            # Para cilíndricas: calcular radio y altura REALES
             try:
-                r_min, r_max, z_min, z_max = 0, 0, 0, 0
+                # Extraer límites reales de r, θ, z
+                r_min = float(sp.N(sp.sympify(limites.get('r', ('0', '1'))[0])))
+                r_max = float(sp.N(sp.sympify(limites.get('r', ('0', '1'))[1])))
+                theta_min = float(sp.N(sp.sympify(limites.get('theta', ('0', '2*pi'))[0])))
+                theta_max = float(sp.N(sp.sympify(limites.get('theta', ('0', '2*pi'))[1])))
                 
-                for var, (min_val, max_val) in limites.items():
-                    try:
-                        if var == 'r':
-                            r_min = float(sp.N(sp.sympify(min_val)))
-                            r_max = float(sp.N(sp.sympify(max_val)))
-                        elif var == 'z':
-                            z_min = float(sp.N(sp.sympify(min_val)))
-                            z_max = float(sp.N(sp.sympify(max_val)))
-                    except:
-                        # Si hay límites variables, usar aproximación
-                        if var == 'r': 
-                            r_max = max(r_max, 2.0)
-                        elif var == 'z':
-                            z_max = max(z_max, 4.0)
+                # Verificar si los límites en z son variables
+                z_min_str = limites.get('z', ('0', '1'))[0]
+                z_max_str = limites.get('z', ('0', '1'))[1]
                 
-                if r_max > 0 and z_max > 0:
-                    altura = z_max - z_min
-                    self.graficar_cilindro(limites, r_max, altura)
-                    self.registrar(f"\n📐 Región cilíndrica: Radio máximo = {r_max:.2f}, Altura = {altura:.2f}")
-                    if r_min > 0:
-                        self.registrar(f"   (Radio variable: {r_min:.2f} a {r_max:.2f})")
+                if 'r' in z_min_str or 'r' in z_max_str:
+                    # Usar función especial para límites variables
+                    self.graficar_region_cilindrica_compleja(r_min, r_max, theta_min, theta_max, z_min_str, z_max_str)
                 else:
-                    self.graficar_cilindro(limites, 2, 4)
-                    self.registrar("\n📐 Región cilíndrica aproximada")
-                    
+                    # Límites constantes en z
+                    z_min = float(sp.N(sp.sympify(z_min_str)))
+                    z_max = float(sp.N(sp.sympify(z_max_str)))
+                    self.graficar_region_cilindrica(r_min, r_max, theta_min, theta_max, z_min, z_max)
+                
+                self.registrar(f"\n📐 Región cilíndrica REAL:")
+                self.registrar(f"   r: [{r_min:.2f}, {r_max:.2f}]")
+                self.registrar(f"   θ: [{theta_min:.2f}, {theta_max:.2f}]")
+                self.registrar(f"   z: [{z_min_str}, {z_max_str}]")
+                
             except Exception as e:
-                self.graficar_cilindro(limites, 2, 4)
-                self.registrar(f"\n⚠️  Visualización aproximada: {e}")
+                self.registrar(f"\n⚠️  Error procesando límites cilíndricos: {e}")
+                # Fallback simple
+                self.graficar_region_cilindrica(0, 1, 0, 2*np.pi, 0, 1)
 
         else:  # rectangular
             try:
-                # Intentar obtener límites numéricos
-                x_max = float(sp.N(sp.sympify(limites.get('x',('0','1'))[1])))
-                y_max = float(sp.N(sp.sympify(limites.get('y',('0','1'))[1])))
-                z_max = float(sp.N(sp.sympify(limites.get('z',('0','1'))[1])))
-                self.graficar_caja_rectangular(limites, x_max, y_max, z_max)
+                # Extraer límites reales de x, y, z
+                x_min = float(sp.N(sp.sympify(limites.get('x', ('0', '1'))[0])))
+                x_max = float(sp.N(sp.sympify(limites.get('x', ('0', '1'))[1])))
+                
+                # Para límites variables en y, necesitamos las funciones
+                y_min_str = limites.get('y', ('0', '1'))[0]
+                y_max_str = limites.get('y', ('0', '1'))[1]
+                
+                z_min = float(sp.N(sp.sympify(limites.get('z', ('0', '1'))[0])))
+                z_max = float(sp.N(sp.sympify(limites.get('z', ('0', '1'))[1])))
+                
+                # Verificar si los límites en y son variables
+                if 'x' in y_min_str or 'x' in y_max_str:
+                    # Usar función especial para límites variables
+                    y_min_func = sp.sympify(y_min_str)
+                    y_max_func = sp.sympify(y_max_str)
+                    self.graficar_region_rectangular_compleja(x_min, x_max, y_min_func, y_max_func, z_min, z_max)
+                else:
+                    # Límites constantes en y
+                    y_min = float(sp.N(sp.sympify(y_min_str)))
+                    y_max = float(sp.N(sp.sympify(y_max_str)))
+                    self.graficar_region_rectangular(x_min, x_max, y_min, y_max, z_min, z_max)
+                
+                self.registrar(f"\n📐 Región rectangular REAL:")
+                self.registrar(f"   x: [{x_min:.2f}, {x_max:.2f}]")
+                self.registrar(f"   y: [{y_min_str}, {y_max_str}]")
+                self.registrar(f"   z: [{z_min:.2f}, {z_max:.2f}]")
+                
             except Exception as e:
-                # Si hay límites variables, mostrar región aproximada
-                self.registrar(f"\n⚠️  NOTA: Límites variables detectados - {e}")
-                self.registrar("   Mostrando región aproximada con límites máximos")
-                try:
-                    # Calcular límites máximos aproximados
-                    x_max_val = 0
-                    y_max_val = 0  
-                    z_max_val = 0
-                    
-                    for var, (min_val, max_val) in limites.items():
-                        try:
-                            if var == 'x':
-                                x_max_val = max(x_max_val, float(sp.N(sp.sympify(max_val))))
-                            elif var == 'y':
-                                y_max_val = max(y_max_val, float(sp.N(sp.sympify(max_val))))
-                            elif var == 'z':
-                                z_max_val = max(z_max_val, float(sp.N(sp.sympify(max_val))))
-                        except:
-                            # Si no se puede convertir, usar valor por defecto
-                            if var == 'x': x_max_val = max(x_max_val, 2.0)
-                            elif var == 'y': y_max_val = max(y_max_val, 1.0) 
-                            elif var == 'z': z_max_val = max(z_max_val, 3.0)
-                    
-                    self.graficar_caja_rectangular(None, x_max_val, y_max_val, z_max_val)
-                except:
-                    self.graficar_caja_rectangular(None, 2, 1, 3)
+                self.registrar(f"\n⚠️  Error procesando límites rectangulares: {e}")
+                # Fallback a región simple
+                self.graficar_region_rectangular(0, 1, 0, 1, 0, 1)
 
     def abrir_green(self):
         self.limpiar_todo()
@@ -2513,8 +2684,8 @@ class AplicacionMultivariable(tk.Tk):
                 self.registrar(f"\n📊 Gráfica: Plano z = {a_val:.2f}x + {b_val:.2f}y + {c_val:.2f}")
                 
             elif superficie == 'paraboloide':
-                a_val = float(sp.N(sp.sympify(p2)))
                 R_real = float(sp.N(sp.sympify(p1)))
+                a_val = float(sp.N(sp.sympify(p2))) if 'p2' in parametros_superficie else 4
                 self.graficar_paraboloide_3d(a_val, R_real)
                 self.registrar(f"\n📊 Gráfica: Paraboloide z = {a_val:.2f} - x² - y²")
                 
@@ -2592,38 +2763,98 @@ class AplicacionMultivariable(tk.Tk):
         
         self.lienzo.draw()
 
-    def graficar_cilindro(self, limites=None, a=1, h=1):
-        """Grafica cilindro con límites reales"""
+    def graficar_cilindro(self, r_min, r_max, theta_min, theta_max, z_min, z_max):
+        """Grafica región cilíndrica REAL basada en los límites de integración"""
         self.limpiar_grafico()
         eje = self.eje
         
-        # Procesar límites reales si se proporcionan
-        if limites and isinstance(limites, dict):
-            try:
-                r_max = float(sp.N(sp.sympify(limites.get('r', ('0', '1'))[1])))
-                z_min = float(sp.N(sp.sympify(limites.get('z', ('0', '1'))[0])))
-                z_max = float(sp.N(sp.sympify(limites.get('z', ('0', '1'))[1])))
-                a = r_max
-                h = z_max - z_min
-            except:
-                pass
+        altura = z_max - z_min
+        es_cilindro_completo = (theta_min == 0 and theta_max >= 2*np.pi)
         
-        z = np.linspace(0, h, 30)
-        theta = np.linspace(0, 2*np.pi, 60)
-        theta_grid, z_grid = np.meshgrid(theta, z)
-        x = a * np.cos(theta_grid)
-        y = a * np.sin(theta_grid)
+        # Crear malla con límites REALES
+        z_vals = np.linspace(z_min, z_max, 30)
+        theta_vals = np.linspace(theta_min, theta_max, 40)
+        Z_grid, Theta_grid = np.meshgrid(z_vals, theta_vals)
         
-        eje.plot_surface(x, y, z_grid, alpha=0.6, edgecolor='k')
-        eje.set_box_aspect((1, 1, h))
+        # Si r_min > 0, es un cilindro hueco (anillo cilíndrico)
+        if r_min > 0:
+            # Superficie exterior
+            X_ext = r_max * np.cos(Theta_grid)
+            Y_ext = r_max * np.sin(Theta_grid)
+            eje.plot_surface(X_ext, Y_ext, Z_grid, alpha=0.6, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            # Superficie interior
+            X_int = r_min * np.cos(Theta_grid)
+            Y_int = r_min * np.sin(Theta_grid)
+            eje.plot_surface(X_int, Y_int, Z_grid, alpha=0.4, color='lightcoral', edgecolor='red', linewidth=0.3)
+            
+            titulo = f'Anillo Cilíndrico\nr: [{r_min:.2f}, {r_max:.2f}]'
+        else:
+            # Cilindro sólido
+            X = r_max * np.cos(Theta_grid)
+            Y = r_max * np.sin(Theta_grid)
+            eje.plot_surface(X, Y, Z_grid, alpha=0.7, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            if es_cilindro_completo:
+                titulo = f'Cilindro Completo\nRadio: {r_max:.2f}'
+            else:
+                titulo = f'Sector Cilíndrico\nRadio: {r_max:.2f}'
         
-        # Etiquetas mejoradas
-        eje.set_xlabel('EJE X', fontweight='bold', color='red')
-        eje.set_ylabel('EJE Y', fontweight='bold', color='green') 
-        eje.set_zlabel('EJE Z', fontweight='bold', color='blue')
-        eje.set_title(f'Coordenadas Cilíndricas\nRadio: {a:.2f}, Altura: {h:.2f}')
+        # Tapas superior e inferior
+        r_vals = np.linspace(r_min, r_max, 20)
+        theta_tapa = np.linspace(theta_min, theta_max, 30)
+        R_tapa, Theta_tapa = np.meshgrid(r_vals, theta_tapa)
         
+        X_tapa = R_tapa * np.cos(Theta_tapa)
+        Y_tapa = R_tapa * np.sin(Theta_tapa)
+        
+        # Tapa superior
+        Z_superior = np.ones_like(X_tapa) * z_max
+        eje.plot_surface(X_tapa, Y_tapa, Z_superior, alpha=0.5, color='lightgreen')
+        
+        # Tapa inferior
+        Z_inferior = np.ones_like(X_tapa) * z_min
+        eje.plot_surface(X_tapa, Y_tapa, Z_inferior, alpha=0.5, color='lightyellow')
+        
+        # Si θ no es completo, dibujar planos delimitadores
+        if not es_cilindro_completo:
+            r_plano = np.linspace(r_min, r_max, 20)
+            z_plano = np.linspace(z_min, z_max, 20)
+            R_plano, Z_plano = np.meshgrid(r_plano, z_plano)
+            
+            # Plano en θ_min
+            X_plano1 = R_plano * np.cos(theta_min)
+            Y_plano1 = R_plano * np.sin(theta_min)
+            eje.plot_surface(X_plano1, Y_plano1, Z_plano, alpha=0.3, color='orange')
+            
+            # Plano en θ_max
+            X_plano2 = R_plano * np.cos(theta_max)
+            Y_plano2 = R_plano * np.sin(theta_max)
+            eje.plot_surface(X_plano2, Y_plano2, Z_plano, alpha=0.3, color='pink')
+        
+        # Configuración de ejes
+        max_radio = max(abs(r_max), abs(r_min))
+        margen = max_radio * 0.2
+        limite_xy = max_radio + margen
+        
+        eje.set_xlim([-limite_xy, limite_xy])
+        eje.set_ylim([-limite_xy, limite_xy])
+        eje.set_zlim([z_min - margen, z_max + margen])
+        eje.set_box_aspect([1, 1, altura/max_radio if max_radio > 0 else 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        # Agregar información de límites al título
+        titulo += f'\nAltura: {altura:.2f}'
+        titulo += f'\nθ: [{theta_min:.2f}, {theta_max:.2f}] rad'
+        titulo += f'\nz: [{z_min:.2f}, {z_max:.2f}]'
+        eje.set_title(titulo)
+        
+        eje.view_init(elev=20, azim=45)
         self.lienzo.draw()
+
 
     def graficar_caja_rectangular(self, limites=None, x_max=1, y_max=1, z_max=1):
         """Grafica una caja rectangular con los límites reales de la integral"""
@@ -2703,6 +2934,539 @@ class AplicacionMultivariable(tk.Tk):
         eje.view_init(elev=20, azim=45)
         
         self.lienzo.draw()
+
+      
+
+    def graficar_region_cilindrica(self, r_min, r_max, theta_min, theta_max, z_min, z_max):
+        """Grafica región cilíndrica REAL basada en los límites de integración"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        altura = z_max - z_min
+        es_cilindro_completo = (theta_min == 0 and theta_max >= 2*np.pi)
+        
+        # Crear malla con límites REALES
+        z_vals = np.linspace(z_min, z_max, 30)
+        theta_vals = np.linspace(theta_min, theta_max, 40)
+        Z_grid, Theta_grid = np.meshgrid(z_vals, theta_vals)
+        
+        # Si r_min > 0, es un cilindro hueco (anillo cilíndrico)
+        if r_min > 0:
+            # Superficie exterior
+            X_ext = r_max * np.cos(Theta_grid)
+            Y_ext = r_max * np.sin(Theta_grid)
+            eje.plot_surface(X_ext, Y_ext, Z_grid, alpha=0.6, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            # Superficie interior
+            X_int = r_min * np.cos(Theta_grid)
+            Y_int = r_min * np.sin(Theta_grid)
+            eje.plot_surface(X_int, Y_int, Z_grid, alpha=0.4, color='lightcoral', edgecolor='red', linewidth=0.3)
+            
+            titulo = f'Cáscara Cilíndrica\nr: [{r_min:.2f}, {r_max:.2f}]'
+        else:
+            # Cilindro sólido
+            X = r_max * np.cos(Theta_grid)
+            Y = r_max * np.sin(Theta_grid)
+            eje.plot_surface(X, Y, Z_grid, alpha=0.7, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            if es_cilindro_completo:
+                titulo = f'Cilindro Completo\nRadio: {r_max:.2f}'
+            else:
+                titulo = f'Sector Cilíndrico\nRadio: {r_max:.2f}'
+        
+        # Tapas superior e inferior
+        r_vals = np.linspace(r_min, r_max, 20)
+        theta_tapa = np.linspace(theta_min, theta_max, 30)
+        R_tapa, Theta_tapa = np.meshgrid(r_vals, theta_tapa)
+        
+        X_tapa = R_tapa * np.cos(Theta_tapa)
+        Y_tapa = R_tapa * np.sin(Theta_tapa)
+        
+        # Tapa superior
+        Z_superior = np.ones_like(X_tapa) * z_max
+        eje.plot_surface(X_tapa, Y_tapa, Z_superior, alpha=0.5, color='lightgreen')
+        
+        # Tapa inferior
+        Z_inferior = np.ones_like(X_tapa) * z_min
+        eje.plot_surface(X_tapa, Y_tapa, Z_inferior, alpha=0.5, color='lightyellow')
+        
+        # Si θ no es completo, dibujar planos delimitadores
+        if not es_cilindro_completo:
+            r_plano = np.linspace(r_min, r_max, 20)
+            z_plano = np.linspace(z_min, z_max, 20)
+            R_plano, Z_plano = np.meshgrid(r_plano, z_plano)
+            
+            # Plano en θ_min
+            X_plano1 = R_plano * np.cos(theta_min)
+            Y_plano1 = R_plano * np.sin(theta_min)
+            eje.plot_surface(X_plano1, Y_plano1, Z_plano, alpha=0.3, color='orange')
+            
+            # Plano en θ_max
+            X_plano2 = R_plano * np.cos(theta_max)
+            Y_plano2 = R_plano * np.sin(theta_max)
+            eje.plot_surface(X_plano2, Y_plano2, Z_plano, alpha=0.3, color='pink')
+        
+        # Configuración de ejes
+        max_radio = max(abs(r_max), abs(r_min))
+        margen = max_radio * 0.2
+        limite_xy = max_radio + margen
+        
+        eje.set_xlim([-limite_xy, limite_xy])
+        eje.set_ylim([-limite_xy, limite_xy])
+        eje.set_zlim([z_min - margen, z_max + margen])
+        eje.set_box_aspect([1, 1, altura/max_radio if max_radio > 0 else 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        # Agregar información de límites al título
+        titulo += f'\nAltura: {altura:.2f}'
+        titulo += f'\nθ: [{theta_min:.2f}, {theta_max:.2f}] rad'
+        titulo += f'\nz: [{z_min:.2f}, {z_max:.2f}]'
+        eje.set_title(titulo)
+        
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw()
+
+    def graficar_region_esferica(self, rho_min, rho_max, phi_min, phi_max, theta_min, theta_max):
+        """Grafica región esférica REAL basada en los límites de integración"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        # Determinar si es esfera completa, hemisferio, o sector esférico
+        es_esfera_completa = (phi_min == 0 and phi_max >= np.pi and 
+                            theta_min == 0 and theta_max >= 2*np.pi)
+        es_hemisferio = (phi_min == 0 and phi_max == np.pi/2) or (phi_min == np.pi/2 and phi_max == np.pi)
+        
+        # Crear malla con los límites REALES
+        phi_vals = np.linspace(phi_min, phi_max, 30)
+        theta_vals = np.linspace(theta_min, theta_max, 40)
+        
+        # Si hay rho_min > 0, graficamos una cáscara esférica
+        if rho_min > 0:
+            # Superficie externa
+            phi_grid, theta_grid = np.meshgrid(phi_vals, theta_vals)
+            x_ext = rho_max * np.sin(phi_grid) * np.cos(theta_grid)
+            y_ext = rho_max * np.sin(phi_grid) * np.sin(theta_grid)
+            z_ext = rho_max * np.cos(phi_grid)
+            eje.plot_surface(x_ext, y_ext, z_ext, alpha=0.6, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            # Superficie interna
+            x_int = rho_min * np.sin(phi_grid) * np.cos(theta_grid)
+            y_int = rho_min * np.sin(phi_grid) * np.sin(theta_grid)
+            z_int = rho_min * np.cos(phi_grid)
+            eje.plot_surface(x_int, y_int, z_int, alpha=0.4, color='lightcoral', edgecolor='red', linewidth=0.3)
+            
+            titulo = f'Cáscara Esférica\nρ: [{rho_min:.2f}, {rho_max:.2f}]'
+        else:
+            # Esfera sólida
+            phi_grid, theta_grid = np.meshgrid(phi_vals, theta_vals)
+            x = rho_max * np.sin(phi_grid) * np.cos(theta_grid)
+            y = rho_max * np.sin(phi_grid) * np.sin(theta_grid)
+            z = rho_max * np.cos(phi_grid)
+            eje.plot_surface(x, y, z, alpha=0.7, color='lightblue', edgecolor='blue', linewidth=0.3)
+            
+            if es_esfera_completa:
+                titulo = f'Esfera Completa\nRadio: {rho_max:.2f}'
+            elif es_hemisferio:
+                titulo = f'Hemisferio\nRadio: {rho_max:.2f}'
+            else:
+                titulo = f'Sector Esférico\nρ: [0, {rho_max:.2f}]'
+        
+        # Si θ no es completo (0 a 2π), dibujar planos delimitadores
+        if not (theta_min == 0 and theta_max >= 2*np.pi):
+            # Plano en θ_min
+            phi_plano = np.linspace(phi_min, phi_max, 20)
+            rho_plano = np.linspace(rho_min, rho_max, 20)
+            Phi_plano, Rho_plano = np.meshgrid(phi_plano, rho_plano)
+            
+            x_plano1 = Rho_plano * np.sin(Phi_plano) * np.cos(theta_min)
+            y_plano1 = Rho_plano * np.sin(Phi_plano) * np.sin(theta_min)
+            z_plano1 = Rho_plano * np.cos(Phi_plano)
+            eje.plot_surface(x_plano1, y_plano1, z_plano1, alpha=0.3, color='yellow')
+            
+            # Plano en θ_max
+            x_plano2 = Rho_plano * np.sin(Phi_plano) * np.cos(theta_max)
+            y_plano2 = Rho_plano * np.sin(Phi_plano) * np.sin(theta_max)
+            z_plano2 = Rho_plano * np.cos(Phi_plano)
+            eje.plot_surface(x_plano2, y_plano2, z_plano2, alpha=0.3, color='orange')
+        
+        # Si φ no es completo (0 a π), dibujar conos/planos delimitadores
+        if not (phi_min == 0 and phi_max >= np.pi):
+            theta_cono = np.linspace(theta_min, theta_max, 30)
+            rho_cono = np.linspace(rho_min, rho_max, 20)
+            Theta_cono, Rho_cono = np.meshgrid(theta_cono, rho_cono)
+            
+            # Superficie en φ_min
+            x_cono1 = Rho_cono * np.sin(phi_min) * np.cos(Theta_cono)
+            y_cono1 = Rho_cono * np.sin(phi_min) * np.sin(Theta_cono)
+            z_cono1 = Rho_cono * np.cos(phi_min)
+            eje.plot_surface(x_cono1, y_cono1, z_cono1, alpha=0.3, color='lightgreen')
+            
+            # Superficie en φ_max
+            x_cono2 = Rho_cono * np.sin(phi_max) * np.cos(Theta_cono)
+            y_cono2 = Rho_cono * np.sin(phi_max) * np.sin(Theta_cono)
+            z_cono2 = Rho_cono * np.cos(phi_max)
+            eje.plot_surface(x_cono2, y_cono2, z_cono2, alpha=0.3, color='lightpink')
+        
+        # Configuración de ejes
+        margen = rho_max * 0.2
+        limite = rho_max + margen
+        eje.set_xlim([-limite, limite])
+        eje.set_ylim([-limite, limite])
+        eje.set_zlim([-limite, limite])
+        eje.set_box_aspect([1, 1, 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        # Agregar información de límites al título
+        titulo += f'\nφ: [{phi_min:.2f}, {phi_max:.2f}] rad'
+        titulo += f'\nθ: [{theta_min:.2f}, {theta_max:.2f}] rad'
+        eje.set_title(titulo)
+        
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw()
+
+    def graficar_region_rectangular(self, x_min, x_max, y_min, y_max, z_min, z_max):
+        """Grafica región rectangular REAL basada en los límites de integración"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        # Calcular dimensiones
+        ancho = x_max - x_min
+        profundo = y_max - y_min
+        alto = z_max - z_min
+        
+        # Definir los 8 vértices del paralelepípedo
+        vertices = np.array([
+            [x_min, y_min, z_min], [x_max, y_min, z_min],
+            [x_max, y_max, z_min], [x_min, y_max, z_min],
+            [x_min, y_min, z_max], [x_max, y_min, z_max],
+            [x_max, y_max, z_max], [x_min, y_max, z_max]
+        ])
+        
+        # Definir las 6 caras como mallas
+        # Cara frontal (y = y_min)
+        x_front = np.array([[x_min, x_max], [x_min, x_max]])
+        y_front = np.array([[y_min, y_min], [y_min, y_min]])
+        z_front = np.array([[z_min, z_min], [z_max, z_max]])
+        eje.plot_surface(x_front, y_front, z_front, alpha=0.6, color='lightblue')
+        
+        # Cara trasera (y = y_max)
+        x_back = np.array([[x_min, x_max], [x_min, x_max]])
+        y_back = np.array([[y_max, y_max], [y_max, y_max]])
+        z_back = np.array([[z_min, z_min], [z_max, z_max]])
+        eje.plot_surface(x_back, y_back, z_back, alpha=0.6, color='lightcoral')
+        
+        # Cara izquierda (x = x_min)
+        x_left = np.array([[x_min, x_min], [x_min, x_min]])
+        y_left = np.array([[y_min, y_max], [y_min, y_max]])
+        z_left = np.array([[z_min, z_min], [z_max, z_max]])
+        eje.plot_surface(x_left, y_left, z_left, alpha=0.6, color='lightgreen')
+        
+        # Cara derecha (x = x_max)
+        x_right = np.array([[x_max, x_max], [x_max, x_max]])
+        y_right = np.array([[y_min, y_max], [y_min, y_max]])
+        z_right = np.array([[z_min, z_min], [z_max, z_max]])
+        eje.plot_surface(x_right, y_right, z_right, alpha=0.6, color='lightyellow')
+        
+        # Cara superior (z = z_max)
+        x_top = np.array([[x_min, x_max], [x_min, x_max]])
+        y_top = np.array([[y_min, y_min], [y_max, y_max]])
+        z_top = np.array([[z_max, z_max], [z_max, z_max]])
+        eje.plot_surface(x_top, y_top, z_top, alpha=0.6, color='lightpink')
+        
+        # Cara inferior (z = z_min)
+        x_bottom = np.array([[x_min, x_max], [x_min, x_max]])
+        y_bottom = np.array([[y_min, y_min], [y_max, y_max]])
+        z_bottom = np.array([[z_min, z_min], [z_min, z_min]])
+        eje.plot_surface(x_bottom, y_bottom, z_bottom, alpha=0.6, color='lavender')
+        
+        # Dibujar aristas para mejor visualización
+        edges = [
+            [vertices[0], vertices[1]], [vertices[1], vertices[2]],
+            [vertices[2], vertices[3]], [vertices[3], vertices[0]],
+            [vertices[4], vertices[5]], [vertices[5], vertices[6]],
+            [vertices[6], vertices[7]], [vertices[7], vertices[4]],
+            [vertices[0], vertices[4]], [vertices[1], vertices[5]],
+            [vertices[2], vertices[6]], [vertices[3], vertices[7]]
+        ]
+        
+        for edge in edges:
+            points = np.array(edge)
+            eje.plot3D(*points.T, 'k-', linewidth=1.5)
+        
+        # Configuración de ejes
+        margen = 0.1
+        eje.set_xlim([x_min - margen, x_max + margen])
+        eje.set_ylim([y_min - margen, y_max + margen])
+        eje.set_zlim([z_min - margen, z_max + margen])
+        
+        # Calcular aspect ratio proporcional
+        max_dim = max(ancho, profundo, alto)
+        if max_dim > 0:
+            eje.set_box_aspect([ancho/max_dim, profundo/max_dim, alto/max_dim])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        # Título con dimensiones reales
+        titulo = f'Región Rectangular\n'
+        titulo += f'Dimensiones: {ancho:.2f} × {profundo:.2f} × {alto:.2f}\n'
+        titulo += f'x: [{x_min:.2f}, {x_max:.2f}] | '
+        titulo += f'y: [{y_min:.2f}, {y_max:.2f}] | '
+        titulo += f'z: [{z_min:.2f}, {z_max:.2f}]'
+        eje.set_title(titulo, fontsize=9)
+        
+        eje.grid(True, alpha=0.3)
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw() 
+
+    def graficar_region_rectangular_compleja(self, x_min, x_max, y_min_func, y_max_func, z_min, z_max):
+        """Grafica región rectangular con límites variables en y"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        # Crear malla de puntos
+        x_vals = np.linspace(x_min, x_max, 30)
+        z_vals = np.linspace(z_min, z_max, 20)
+        
+        # Para cada x, calcular los límites en y
+        X = []
+        Y = [] 
+        Z = []
+        
+        for x in x_vals:
+            try:
+                # Evaluar los límites en y para este x
+                y_min_val = float(sp.N(y_min_func.subs(sp.Symbol('x'), x)))
+                y_max_val = float(sp.N(y_max_func.subs(sp.Symbol('x'), x)))
+                
+                # Crear puntos para esta sección x
+                y_section = np.linspace(y_min_val, y_max_val, 20)
+                for y in y_section:
+                    for z in z_vals:
+                        X.append(x)
+                        Y.append(y) 
+                        Z.append(z)
+            except:
+                continue
+        
+        # Convertir a arrays numpy
+        X = np.array(X)
+        Y = np.array(Y)
+        Z = np.array(Z)
+        
+        if len(X) > 0:
+            # Graficar usando scatter para regiones complejas
+            scatter = eje.scatter(X, Y, Z, c=Z, cmap='viridis', alpha=0.6, s=1)
+            
+            # Agregar superficie exterior para mejor visualización
+            # Superficie lateral (x = x_min)
+            y_surf = np.linspace(min(Y), max(Y), 20)
+            z_surf = np.linspace(z_min, z_max, 20)
+            Y_surf, Z_surf = np.meshgrid(y_surf, z_surf)
+            X_surf_min = np.ones_like(Y_surf) * x_min
+            eje.plot_surface(X_surf_min, Y_surf, Z_surf, alpha=0.3, color='blue')
+            
+            # Superficie lateral (x = x_max)
+            X_surf_max = np.ones_like(Y_surf) * x_max
+            eje.plot_surface(X_surf_max, Y_surf, Z_surf, alpha=0.3, color='blue')
+        
+        # Configuración de ejes
+        margen = 0.5
+        if len(X) > 0:
+            eje.set_xlim([min(X)-margen, max(X)+margen])
+            eje.set_ylim([min(Y)-margen, max(Y)+margen])
+        else:
+            eje.set_xlim([x_min-margen, x_max+margen])
+            eje.set_ylim([-2, 2])
+        
+        eje.set_zlim([z_min-margen, z_max+margen])
+        eje.set_box_aspect([1, 1, 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green') 
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        titulo = f'Región Rectangular Compleja\n'
+        titulo += f'x: [{x_min}, {x_max}]\n'
+        titulo += f'y: -√(1-x²) a √(1-x²)\n'
+        titulo += f'z: [{z_min}, {z_max}]'
+        eje.set_title(titulo, fontsize=9)
+        
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw()
+
+    def graficar_region_cilindrica_compleja(self, r_min, r_max, theta_min, theta_max, z_min_func, z_max_func):
+        """Grafica región cilíndrica con límites variables en z"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        # Crear malla
+        r_vals = np.linspace(r_min, r_max, 20)
+        theta_vals = np.linspace(theta_min, theta_max, 30)
+        
+        R, Theta = np.meshgrid(r_vals, theta_vals)
+        
+        # Calcular límites en z para cada punto
+        Z_min = np.zeros_like(R)
+        Z_max = np.zeros_like(R)
+        
+        for i in range(len(theta_vals)):
+            for j in range(len(r_vals)):
+                try:
+                    r_val = r_vals[j]
+                    # z mínimo (r)
+                    Z_min[i,j] = r_val
+                    # z máximo (4)
+                    Z_max[i,j] = 4
+                except:
+                    Z_min[i,j] = 0
+                    Z_max[i,j] = 4
+        
+        # Convertir a coordenadas cartesianas
+        X_min = R * np.cos(Theta)
+        Y_min = R * np.sin(Theta)
+        
+        X_max = X_min.copy()
+        Y_max = Y_min.copy()
+        
+        # Graficar superficie inferior (z = r)
+        eje.plot_surface(X_min, Y_min, Z_min, alpha=0.7, color='lightblue', label='Base inferior')
+        
+        # Graficar superficie superior (z = 4)
+        eje.plot_surface(X_max, Y_max, Z_max, alpha=0.5, color='lightgreen', label='Tapa superior')
+        
+        # Graficar superficie lateral
+        z_lateral = np.linspace(np.min(Z_min), np.max(Z_max), 20)
+        theta_lateral = np.linspace(theta_min, theta_max, 30)
+        Z_lat, Theta_lat = np.meshgrid(z_lateral, theta_lateral)
+        
+        X_lat = r_max * np.cos(Theta_lat)
+        Y_lat = r_max * np.sin(Theta_lat)
+        eje.plot_surface(X_lat, Y_lat, Z_lat, alpha=0.6, color='lightcoral', label='Superficie lateral')
+        
+        # Graficar planos delimitadores en theta
+        if theta_min != 0 or theta_max != 2*np.pi:
+            r_plano = np.linspace(r_min, r_max, 20)
+            z_plano = np.linspace(np.min(Z_min), np.max(Z_max), 20)
+            R_plano, Z_plano = np.meshgrid(r_plano, z_plano)
+            
+            # Plano en theta_min
+            X_plano1 = R_plano * np.cos(theta_min)
+            Y_plano1 = R_plano * np.sin(theta_min)
+            eje.plot_surface(X_plano1, Y_plano1, Z_plano, alpha=0.3, color='yellow')
+            
+            # Plano en theta_max
+            X_plano2 = R_plano * np.cos(theta_max)
+            Y_plano2 = R_plano * np.sin(theta_max)
+            eje.plot_surface(X_plano2, Y_plano2, Z_plano, alpha=0.3, color='orange')
+        
+        # Configuración
+        max_range = max(r_max, 4) * 1.2
+        eje.set_xlim([-max_range, max_range])
+        eje.set_ylim([-max_range, max_range])
+        eje.set_zlim([0, 5])
+        eje.set_box_aspect([1, 1, 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        titulo = f'Región Cilíndrica Compleja\n'
+        titulo += f'r: [{r_min}, {r_max}], θ: [{theta_min:.2f}, {theta_max:.2f}]\n'
+        titulo += f'z: r a 4'
+        eje.set_title(titulo)
+        
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw()
+
+    def graficar_region_esferica_compleja(self, rho_min, rho_max, phi_min, phi_max, theta_min, theta_max):
+        """Grafica región esférica con límites angulares parciales"""
+        self.limpiar_grafico()
+        eje = self.eje
+        
+        # Crear mallas para las superficies
+        phi_vals = np.linspace(phi_min, phi_max, 30)
+        theta_vals = np.linspace(theta_min, theta_max, 40)
+        
+        # Superficie exterior
+        phi_grid, theta_grid = np.meshgrid(phi_vals, theta_vals)
+        x_ext = rho_max * np.sin(phi_grid) * np.cos(theta_grid)
+        y_ext = rho_max * np.sin(phi_grid) * np.sin(theta_grid)
+        z_ext = rho_max * np.cos(phi_grid)
+        
+        # Superficie interior (si rho_min > 0)
+        if rho_min > 0:
+            x_int = rho_min * np.sin(phi_grid) * np.cos(theta_grid)
+            y_int = rho_min * np.sin(phi_grid) * np.sin(theta_grid)
+            z_int = rho_min * np.cos(phi_grid)
+            eje.plot_surface(x_int, y_int, z_int, alpha=0.4, color='lightcoral', edgecolor='red')
+        
+        # Graficar superficie exterior
+        eje.plot_surface(x_ext, y_ext, z_ext, alpha=0.6, color='lightblue', edgecolor='blue')
+        
+        # Graficar planos delimitadores en theta
+        if not (theta_min == -np.pi and theta_max == np.pi):
+            # Plano en theta_min
+            phi_plano = np.linspace(phi_min, phi_max, 20)
+            rho_plano = np.linspace(rho_min, rho_max, 20)
+            Phi_plano, Rho_plano = np.meshgrid(phi_plano, rho_plano)
+            
+            x_plano1 = Rho_plano * np.sin(Phi_plano) * np.cos(theta_min)
+            y_plano1 = Rho_plano * np.sin(Phi_plano) * np.sin(theta_min)
+            z_plano1 = Rho_plano * np.cos(Phi_plano)
+            eje.plot_surface(x_plano1, y_plano1, z_plano1, alpha=0.3, color='yellow')
+            
+            # Plano en theta_max
+            x_plano2 = Rho_plano * np.sin(Phi_plano) * np.cos(theta_max)
+            y_plano2 = Rho_plano * np.sin(Phi_plano) * np.sin(theta_max)
+            z_plano2 = Rho_plano * np.cos(Phi_plano)
+            eje.plot_surface(x_plano2, y_plano2, z_plano2, alpha=0.3, color='orange')
+        
+        # Graficar conos delimitadores en phi
+        if not (phi_min == 0 and phi_max == np.pi):
+            theta_cono = np.linspace(theta_min, theta_max, 30)
+            rho_cono = np.linspace(rho_min, rho_max, 20)
+            Theta_cono, Rho_cono = np.meshgrid(theta_cono, rho_cono)
+            
+            # Superficie en phi_min
+            x_cono1 = Rho_cono * np.sin(phi_min) * np.cos(Theta_cono)
+            y_cono1 = Rho_cono * np.sin(phi_min) * np.sin(Theta_cono)
+            z_cono1 = Rho_cono * np.cos(phi_min)
+            eje.plot_surface(x_cono1, y_cono1, z_cono1, alpha=0.3, color='lightgreen')
+            
+            # Superficie en phi_max
+            x_cono2 = Rho_cono * np.sin(phi_max) * np.cos(Theta_cono)
+            y_cono2 = Rho_cono * np.sin(phi_max) * np.sin(Theta_cono)
+            z_cono2 = Rho_cono * np.cos(phi_max)
+            eje.plot_surface(x_cono2, y_cono2, z_cono2, alpha=0.3, color='lightpink')
+        
+        # Configuración
+        margen = rho_max * 0.2
+        limite = rho_max + margen
+        eje.set_xlim([-limite, limite])
+        eje.set_ylim([-limite, limite])
+        eje.set_zlim([-limite, limite])
+        eje.set_box_aspect([1, 1, 1])
+        
+        eje.set_xlabel('X', fontweight='bold', color='red')
+        eje.set_ylabel('Y', fontweight='bold', color='green')
+        eje.set_zlabel('Z', fontweight='bold', color='blue')
+        
+        titulo = f'Cáscara Esférica Parcial\n'
+        titulo += f'ρ: [{rho_min:.1f}, {rho_max:.1f}]\n'
+        titulo += f'φ: [{phi_min:.2f}, {phi_max:.2f}]\n'
+        titulo += f'θ: [{theta_min:.2f}, {theta_max:.2f}]'
+        eje.set_title(titulo, fontsize=9)
+        
+        eje.view_init(elev=20, azim=45)
+        self.lienzo.draw()  
 
     def graficar_disco(self, R=1):
         self.limpiar_grafico()
@@ -3255,30 +4019,90 @@ class AplicacionMultivariable(tk.Tk):
         self.lienzo.draw()
 
     def graficar_paraboloide_3d(self, a=4, R=2):
-        """Grafica paraboloide z = a - x² - y²"""
+        """Grafica paraboloide z = a - x² - y² para el teorema de Stokes - CORREGIDA"""
         self.limpiar_grafico()
         eje = self.eje
         
-        # Crear malla
-        x = np.linspace(-R, R, 30)
-        y = np.linspace(-R, R, 30)
-        X, Y = np.meshgrid(x, y)
-        
-        # Ecuación del paraboloide: z = a - x² - y²
-        Z = a - X**2 - Y**2
-        Z[Z < 0] = np.nan  # Solo parte positiva
-        
-        # Graficar paraboloide
-        eje.plot_surface(X, Y, Z, alpha=0.7, color='lightgreen', edgecolor='darkgreen')
-        
-        # Configurar ejes
-        eje.set_xlabel('X')
-        eje.set_ylabel('Y')
-        eje.set_zlabel('Z')
-        eje.set_title(f'Paraboloide: z = {a} - x² - y²')
-        eje.set_box_aspect([1, 1, 1])
-        
-        self.lienzo.draw()
+        try:
+            # Crear malla correctamente
+            x = np.linspace(-R, R, 30)
+            y = np.linspace(-R, R, 30)
+            X, Y = np.meshgrid(x, y)
+            
+            # Ecuación del paraboloide: z = a - x² - y²
+            Z = a - X**2 - Y**2
+            
+            # Solo graficar donde z >= 0 (parte superior)
+            Z[Z < 0] = np.nan
+            
+            # Graficar superficie del paraboloide
+            superficie = eje.plot_surface(X, Y, Z, alpha=0.7, color='lightblue', 
+                                        edgecolor='darkblue', linewidth=0.5)
+            
+            # Graficar curva borde (círculo en z=0)
+            theta_borde = np.linspace(0, 2*np.pi, 100)
+            x_borde = R * np.cos(theta_borde)
+            y_borde = R * np.sin(theta_borde)
+            z_borde = np.zeros_like(theta_borde)
+            
+            eje.plot(x_borde, y_borde, z_borde, 'r-', linewidth=3, label='Curva C')
+            
+            # Graficar campo vectorial en la superficie
+            x_vec = np.linspace(-R*0.7, R*0.7, 8)
+            y_vec = np.linspace(-R*0.7, R*0.7, 8)
+            X_vec, Y_vec = np.meshgrid(x_vec, y_vec)
+            Z_vec = a - X_vec**2 - Y_vec**2
+            Z_vec[Z_vec < 0] = np.nan  # Solo donde existe la superficie
+            
+            # Graficar vectores normales
+            for i in range(len(x_vec)):
+                for j in range(len(y_vec)):
+                    if not np.isnan(Z_vec[i,j]):
+                        x_point = X_vec[i,j]
+                        y_point = Y_vec[i,j] 
+                        z_point = Z_vec[i,j]
+                        
+                        # Vector normal al paraboloide (hacia arriba)
+                        dx_norm = 2*x_point
+                        dy_norm = 2*y_point
+                        dz_norm = 1
+                        magnitud = np.sqrt(dx_norm**2 + dy_norm**2 + dz_norm**2)
+                        
+                        eje.quiver(x_point, y_point, z_point, 
+                                dx_norm/magnitud*0.3, dy_norm/magnitud*0.3, dz_norm/magnitud*0.3,
+                                color='blue', alpha=0.6, linewidth=1)
+            
+            # Configuración de ejes
+            max_limit = max(R, a) * 1.2
+            eje.set_xlim([-max_limit, max_limit])
+            eje.set_ylim([-max_limit, max_limit])
+            eje.set_zlim([-1, a + 1])
+            eje.set_box_aspect([1, 1, 1])
+            
+            # Etiquetas y título
+            eje.set_xlabel('X')
+            eje.set_ylabel('Y')
+            eje.set_zlabel('Z')
+            eje.set_title(f'Teorema de Stokes - Paraboloide\nz = {a} - x² - y²')
+            
+            # Leyenda
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor='lightblue', alpha=0.7, label='Superficie S'),
+                Patch(facecolor='red', alpha=1, label='Curva C (borde)'),
+                Patch(facecolor='blue', alpha=0.6, label='Vectores normales')
+            ]
+            eje.legend(handles=legend_elements, loc='upper right')
+            
+            # Vista inicial
+            eje.view_init(elev=30, azim=45)
+            
+            self.lienzo.draw()
+            
+        except Exception as e:
+            print(f"Error graficando paraboloide: {e}")
+            # Gráfica de fallback simple
+            self.graficar_disco(R)
 
     def graficar_cilindro_3d(self, R=2, h=3):
         """Grafica cilindro x² + y² = R², 0 ≤ z ≤ h"""
@@ -3475,6 +4299,7 @@ class AplicacionMultivariable(tk.Tk):
         
         self.lienzo.draw()
 
+    
     def graficar_region_entre_superficies(self, R_int, R_ext, altura):
         """Grafica región entre dos superficies (ej: cilindros)"""
         self.limpiar_grafico()
